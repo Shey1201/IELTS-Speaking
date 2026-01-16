@@ -1,0 +1,7 @@
+{
+  "name": "IELTS Speaking",
+  "description": "Professional IELTS Speaking practice application with AI-powered scoring and feedback based on official criteria.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
