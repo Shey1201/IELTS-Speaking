@@ -18,7 +18,8 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const getClient = () => {
-  const apiKey = process.env.API_KEY;
+  // Use provided key for deployment, fallback to process.env if available
+  const apiKey = "AIzaSyBRuSVtb_K-CKHCUbMsSPz015VXINYdOkY" || process.env.API_KEY;
   if (!apiKey) {
     throw new Error("API Key is missing. Please check your environment configuration.");
   }
@@ -177,7 +178,7 @@ export const evaluateAudio = async (
 
   return withRetry(async () => {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-pro-preview',
         contents: {
           parts: [
             { inlineData: { mimeType: audioBlob.type || 'audio/webm', data: base64Audio } },
@@ -212,7 +213,7 @@ export const generateMockTest = async (): Promise<MockQuestion[]> => {
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-pro-preview',
         contents: { text: prompt },
         config: { responseMimeType: "application/json" }
     });
@@ -273,7 +274,7 @@ const evaluateMockPart = async (
 
     return withRetry(async () => {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-pro-preview',
             contents: { parts: audioParts },
             config: { responseMimeType: "application/json" }
         });
