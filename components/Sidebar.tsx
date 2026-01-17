@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { IeLtsPart, Topic, MockExamResult } from '../types';
 // @ts-ignore
 import { extractRawText } from 'mammoth';
@@ -12,6 +12,7 @@ interface SidebarProps {
   onUpdateTopic: (topic: Topic) => void;
   onImportTopics: (topics: Topic[]) => void;
   onDeleteTopic: (id: string) => void;
+  onDeleteCategory: (category: string) => void;
   onToggleStar: (id: string) => void;
   onToggleCategoryStar: (category: string) => void;
   activeMode: 'practice' | 'mock';
@@ -114,6 +115,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onUpdateTopic,
   onImportTopics,
   onDeleteTopic,
+  onDeleteCategory,
   onToggleStar,
   onToggleCategoryStar,
   activeMode,
@@ -147,6 +149,22 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Main Section Expanded States
   const [isPart1Expanded, setIsPart1Expanded] = useState(true);
   const [isPart23Expanded, setIsPart23Expanded] = useState(true);
+
+  // Sync expanded state with active topic selection
+  useEffect(() => {
+    if (activeTopicId) {
+        const topic = topics.find(t => t.id === activeTopicId);
+        if (topic) {
+            if (topic.part === IeLtsPart.Part2) {
+                // If it's a Part 2 topic, ensure it is expanded
+                setExpandedTopicId(topic.id);
+            } else if (topic.part === IeLtsPart.Part3 && topic.relatedTopicId) {
+                // If it's a Part 3 topic, ensure its parent Part 2 is expanded
+                setExpandedTopicId(topic.relatedTopicId);
+            }
+        }
+    }
+  }, [activeTopicId, topics]);
 
   // Derived Data
   const sortTopics = (a: Topic, b: Topic) => (b.isStarred ? 1 : 0) - (a.isStarred ? 1 : 0);
@@ -233,6 +251,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     e.stopPropagation();
     e.preventDefault();
     onDeleteTopic(id);
+  };
+
+  const handleDeleteCategoryClick = (e: React.MouseEvent, cat: string) => {
+      e.stopPropagation();
+      onDeleteCategory(cat);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -558,22 +581,31 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                         return (
                             <div key={cat} className="space-y-1">
-                                 <div className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm transition-all duration-200 font-medium ${
+                                 <div className={`group w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm transition-all duration-200 font-medium ${
                                         isExpanded ? 'bg-slate-100 text-slate-800' : 'text-slate-600 hover:bg-slate-50'
                                     }`}
                                  >
-                                    <div className="flex items-center flex-1" onClick={() => toggleCategory(cat)}>
+                                    <div className="flex items-center flex-1 min-w-0" onClick={() => toggleCategory(cat)}>
                                         <StarIcon 
                                             isStarred={isStarred || false} 
                                             onClick={(e) => { e.stopPropagation(); onToggleCategoryStar(cat); }} 
                                         />
-                                        <button className="flex items-center gap-2 flex-1 text-left">
-                                            {cat}
-                                        </button>
+                                        <span className="ml-2 truncate flex-1 text-left">{cat}</span>
                                     </div>
-                                    <button onClick={() => toggleCategory(cat)} className="p-1">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform text-slate-400 ${isExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                    </button>
+
+                                    <div className="flex items-center">
+                                      {/* DELETE BUTTON: Opacity removed to be always visible for easy deletion */}
+                                      <button 
+                                        onClick={(e) => handleDeleteCategoryClick(e, cat)}
+                                        className="p-1.5 mr-1 rounded text-slate-300 hover:bg-red-100 hover:text-red-500 transition-all"
+                                        title="Delete Category"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                      </button>
+                                      <button onClick={() => toggleCategory(cat)} className="p-1 text-slate-400">
+                                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                      </button>
+                                    </div>
                                  </div>
 
                                  {isExpanded && (
@@ -623,7 +655,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                    <div className="space-y-1 animate-in slide-in-from-top-1 fade-in duration-200">
                      {part2Topics.map(p2 => {
                        const relatedPart3s = part3Topics.filter(p3 => p3.relatedTopicId === p2.id);
-                       const isExpanded = expandedTopicId === p2.id || activeTopicId === p2.id || relatedPart3s.some(p3 => p3.id === activeTopicId);
+                       const isExpanded = expandedTopicId === p2.id;
                        
                        return (
                          <div key={p2.id} className="space-y-1">

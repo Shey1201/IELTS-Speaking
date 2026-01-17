@@ -219,7 +219,7 @@ const MockExam: React.FC<MockExamProps> = ({ questions, onFinish, onExit }) => {
         {renderControls()}
         {renderProgress()}
         <ExaminerVisual />
-        <div className="w-full max-w-2xl bg-white p-8 rounded-2xl shadow-lg border border-slate-200 mb-8">
+        <div className="w-full max-w-4xl bg-white p-8 rounded-2xl shadow-lg border border-slate-200 mb-8">
           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-2">Part 2 Topic</h3>
           <h2 className={`text-2xl font-bold text-slate-900 mb-4 transition-all duration-300 ${isTextVisible ? '' : 'blur-md select-none opacity-50'}`}>
               {activeQuestion.title}
@@ -257,7 +257,7 @@ const MockExam: React.FC<MockExamProps> = ({ questions, onFinish, onExit }) => {
   }
 
   return (
-    <div className="flex flex-col h-full max-w-3xl mx-auto p-6 relative">
+    <div className="flex flex-col h-full max-w-5xl mx-auto p-6 relative">
       {renderControls()}
       {renderProgress()}
       

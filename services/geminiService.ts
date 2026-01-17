@@ -36,13 +36,22 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
     
     console.warn(`Quota limit hit (429). Pausing for ${delay}ms before retry... (${retries} attempts left).`);
     await new Promise(resolve => setTimeout(resolve, delay));
-    // Exponential backoff: 2s -> 4s -> 8s
     return withRetry(fn, retries - 1, delay * 2);
   }
 }
 
+// IELTS Rounding Logic: Round to nearest 0.5
+// 5.25 -> 5.5
+// 5.125 -> 5.0
+// 5.75 -> 6.0
+const roundToHalf = (num: number): number => {
+  return Math.round(num * 2) / 2;
+};
+
 // --- TTS Service ---
 let audioContext: AudioContext | null = null;
+// Simple memory cache for TTS: string -> AudioBuffer
+const ttsCache = new Map<string, AudioBuffer>();
 
 const decodeAudioData = async (base64Data: string): Promise<AudioBuffer> => {
   if (!audioContext) {
@@ -76,11 +85,26 @@ const decodeAudioData = async (base64Data: string): Promise<AudioBuffer> => {
 };
 
 export const convertTextToSpeech = async (text: string): Promise<void> => {
+  const cacheKey = text.trim();
+  
+  // 1. Check Cache First (Instant Playback)
+  if (ttsCache.has(cacheKey)) {
+      const buffer = ttsCache.get(cacheKey)!;
+      if (audioContext) {
+          if (audioContext.state === 'suspended') await audioContext.resume();
+          const source = audioContext.createBufferSource();
+          source.buffer = buffer;
+          source.connect(audioContext.destination);
+          source.start();
+          return;
+      }
+  }
+
   const ai = getClient();
 
   // Optimized text processing for natural flow
   const processedText = text
-    .replace(/([.!?])\s/g, '$1 <break time="500ms"/> ') // Explicit pauses
+    .replace(/([.!?])\s/g, '$1 <break time="500ms"/> ') 
     .replace(/,/g, ', <break time="200ms"/> '); 
 
   try {
@@ -92,18 +116,20 @@ export const convertTextToSpeech = async (text: string): Promise<void> => {
               responseModalities: [Modality.AUDIO],
               speechConfig: {
                   voiceConfig: {
-                    // Switched to 'Puck' for a more natural, deep, human-like examiner voice
                     prebuiltVoiceConfig: { voiceName: 'Puck' },
                   },
               },
             },
         });
         return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    }, 2, 1000); // Fewer retries for TTS to keep it snappy, but still retry once
+    }, 2, 1000);
 
     if (!base64Audio) throw new Error("No audio data returned");
 
     const buffer = await decodeAudioData(base64Audio);
+    
+    // 2. Save to Cache
+    ttsCache.set(cacheKey, buffer);
     
     if (audioContext) {
         const source = audioContext.createBufferSource();
@@ -113,7 +139,7 @@ export const convertTextToSpeech = async (text: string): Promise<void> => {
     }
   } catch (error) {
     console.error("TTS Error:", error);
-    // Fallback
+    // Fallback to browser TTS if API fails
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.9;
     window.speechSynthesis.speak(u);
@@ -129,13 +155,12 @@ export const evaluateAudio = async (
   const ai = getClient();
   const base64Audio = await blobToBase64(audioBlob);
 
-  // Optimized prompt for Band 6.5 ("Achievable")
   const prompt = `
     Role: Professional IELTS Speaking Examiner. Topic: "${topic.title}" (${topic.part}).
     
     Instructions:
     1. TRANSCRIPT: Accurate word-for-word.
-    2. SCORE: Strict grading (0-9). Average is 5.5-6.5.
+    2. SCORE: Strict grading (0-9). Scores MUST be in 0.5 increments (e.g. 5.0, 5.5, 6.0).
     3. ANALYSIS: Highlight key errors (Grammar, Pronunciation).
     4. IMPROVEMENT: Generate ONE "Band 6.5" version. 
        - Criteria: Natural, grammatically correct, clear, and achievable. 
@@ -190,6 +215,29 @@ export const evaluateAudio = async (
       if (!text) throw new Error("No response from AI");
       const result = JSON.parse(text);
       
+      // --- CRITICAL: Force Recalculate Score to adhere to IELTS Rules ---
+      // 1. Sanitize sub-scores to nearest 0.5
+      const fc = roundToHalf(result.score.fluencyCoherence);
+      const lr = roundToHalf(result.score.lexicalResource);
+      const gra = roundToHalf(result.score.grammaticalRange);
+      const pr = roundToHalf(result.score.pronunciation);
+
+      // 2. Calculate average
+      const avg = (fc + lr + gra + pr) / 4;
+
+      // 3. Apply IELTS rounding (nearest 0.5)
+      // Note: Math.round(x * 2) / 2 handles the .25 -> .5 and .75 -> .0 logic correctly for positive numbers
+      const overall = roundToHalf(avg);
+
+      // 4. Update result object
+      result.score = {
+          fluencyCoherence: fc,
+          lexicalResource: lr,
+          grammaticalRange: gra,
+          pronunciation: pr,
+          overall: overall
+      };
+      
       return { ...result, timestamp: Date.now() } as EvaluationResult;
   }, 4, 3000); 
 };
@@ -233,7 +281,21 @@ const evaluateMockPart = async (ai: GoogleGenAI, partName: string, questions: Mo
             contents: { parts: audioParts },
             config: { responseMimeType: "application/json" }
         });
-        return JSON.parse(response.text || '{}') as PartResult;
+        const result = JSON.parse(response.text || '{}') as PartResult;
+        
+        // Force sanitize mock part scores too
+        if (result.dimensions) {
+            result.dimensions.fluencyCoherence = roundToHalf(result.dimensions.fluencyCoherence);
+            result.dimensions.lexicalResource = roundToHalf(result.dimensions.lexicalResource);
+            result.dimensions.grammaticalRange = roundToHalf(result.dimensions.grammaticalRange);
+            result.dimensions.pronunciation = roundToHalf(result.dimensions.pronunciation);
+            
+            const avg = (result.dimensions.fluencyCoherence + result.dimensions.lexicalResource + result.dimensions.grammaticalRange + result.dimensions.pronunciation) / 4;
+            result.score = roundToHalf(avg);
+            result.dimensions.overall = result.score;
+        }
+
+        return result;
     }, 4, 3000);
 };
 
@@ -256,7 +318,8 @@ export const evaluateMockTest = async (blobs: Blob[], questions: MockQuestion[])
       ]);
 
       const overallRaw = (p1Result.score + p2Result.score + p3Result.score) / 3;
-      const overallScore = Math.round(overallRaw * 2) / 2;
+      // Final overall rounding
+      const overallScore = roundToHalf(overallRaw);
 
       const scores = [{ name: 'Part 1', score: p1Result.score }, { name: 'Part 2', score: p2Result.score }, { name: 'Part 3', score: p3Result.score }];
       const weakest = scores.sort((a,b) => a.score - b.score)[0].name;

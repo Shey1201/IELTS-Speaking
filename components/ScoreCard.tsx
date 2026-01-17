@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { EvaluationResult, IeLtsPart, TranscriptToken } from '../types';
+import { convertTextToSpeech } from '../services/geminiService';
 
 interface ScoreCardProps {
   result: EvaluationResult;
@@ -13,16 +14,29 @@ interface ScoreCardProps {
 const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart, previousScore, onRetry }) => {
   const { score, transcript, improvedVersions, part3Suggestions, feedbackDetail } = result;
   const [activeTab, setActiveTab] = useState<'fc' | 'lr' | 'gra' | 'pr'>('gra');
+  const [isPlayingModel, setIsPlayingModel] = useState(false);
 
-  const speakText = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v => v.name.includes('Google') && v.lang.includes('en-US')) || voices.find(v => v.lang.includes('en'));
-      if (preferred) utterance.voice = preferred;
-      window.speechSynthesis.speak(utterance);
+  const speakText = async (text: string, isModelAnswer = false) => {
+    // For single words (pronunciation check), use native for speed.
+    // For Model Answer, use Gemini TTS for quality (intonation/pauses).
+    
+    if (isModelAnswer) {
+        if (isPlayingModel) return;
+        setIsPlayingModel(true);
+        try {
+            await convertTextToSpeech(text);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsPlayingModel(false);
+        }
+    } else {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.9;
+            window.speechSynthesis.speak(utterance);
+        }
     }
   };
 
@@ -89,7 +103,8 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400"></span> Pronunciation</span>
                 </div>
             </div>
-            <div className="p-6 text-lg leading-loose text-slate-700">
+            {/* Flex-wrap ensures words wrap correctly even if they are individual spans. Break-words handles extremely long tokens. */}
+            <div className="p-6 text-lg text-slate-700 flex flex-wrap gap-x-1 gap-y-2 leading-relaxed break-words">
                 {transcript.map((t, i) => {
                     const hasGra = !!t.gra;
                     const hasLr = !!t.lr;
@@ -101,7 +116,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                     else if (hasLr) classes = "decoration-indigo-400 decoration-wavy underline underline-offset-4 text-indigo-900 bg-indigo-50";
                     
                     return (
-                        <span key={i} className={`rounded px-0.5 mx-0.5 transition-colors cursor-default ${classes}`} title={hasGra ? t.gra?.error : hasPr ? `IPA: ${t.pr?.ipa}` : ''}>
+                        <span key={i} className={`rounded px-0.5 transition-colors cursor-default ${classes}`} title={hasGra ? t.gra?.error : hasPr ? `IPA: ${t.pr?.ipa}` : ''}>
                             {t.text}
                         </span>
                     );
@@ -270,7 +285,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                                             <div className="text-sm font-mono text-slate-500">/{t.pr?.ipa}/</div>
                                         </div>
                                         <button 
-                                            onClick={() => speakText(t.text)}
+                                            onClick={() => speakText(t.text, false)}
                                             className="p-2 bg-white rounded-full shadow-sm text-blue-500 hover:scale-110 transition-transform"
                                         >
                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
@@ -293,11 +308,16 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                     <div className="flex items-center gap-3 w-full md:w-auto">
                          {/* Play Button */}
                          <button 
-                            onClick={() => speakText(modelAnswer.text)}
-                            className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white shadow-md hover:bg-blue-700 hover:scale-110 transition-all"
-                            title="Shadowing Play"
+                            onClick={() => speakText(modelAnswer.text, true)}
+                            disabled={isPlayingModel}
+                            className={`flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full text-white shadow-md transition-all ${isPlayingModel ? 'bg-slate-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 hover:scale-110'}`}
+                            title="Shadowing Play (Human-like AI Voice)"
                         >
-                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                             {isPlayingModel ? (
+                                 <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                             ) : (
+                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                             )}
                         </button>
 
                         <div>
@@ -325,7 +345,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                 </div>
                 
                 <div className="mt-3 text-right">
-                    <p className="text-xs text-slate-400 font-medium">Tip: Listen and repeat. This answer is simple, clear, and correct.</p>
+                    <p className="text-xs text-slate-400 font-medium">Tip: Listen and repeat. This answer includes natural pauses and intonation.</p>
                 </div>
             </div>
         )}
