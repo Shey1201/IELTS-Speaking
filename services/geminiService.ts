@@ -18,9 +18,7 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const getClient = () => {
-  // Use provided key for deployment, fallback to process.env if available
-  // Added trim() to remove potential whitespace
-  const apiKey = ("AIzaSyBRuSVtb_K-CKHCUbMsSPz015VXINYdOkY" || process.env.API_KEY || "").trim();
+  const apiKey = process.env.API_KEY;
   if (!apiKey) {
     throw new Error("API Key is missing. Please check your environment configuration.");
   }
