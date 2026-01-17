@@ -21,6 +21,91 @@ interface SidebarProps {
   onStartNewMock: () => void;
 }
 
+const parseImportedDoc = (text: string): Topic[] => {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const topics: Topic[] = [];
+  
+  let mode: 'part1' | 'part2' | 'part3' = 'part1';
+  let currentCategory = 'General';
+  let currentPart2Id: string | null = null;
+
+  const part1Regex = /^Part\s*1[:：]?/i;
+  const part2Regex = /^Part\s*2/i;
+  const p3Regex = /^(P|p)3/;
+  const categoryRegex = /^(\d+\.|√)/;
+  const describeRegex = /^Describe\s+a/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (part1Regex.test(line)) {
+      mode = 'part1';
+      continue;
+    }
+    if (part2Regex.test(line)) {
+      mode = 'part2';
+      continue;
+    }
+
+    if (mode === 'part1') {
+      if (categoryRegex.test(line)) {
+        currentCategory = line.replace(/^(\d+\.|√)\s*/, '').split(/[(（]/)[0].trim();
+      } else {
+        topics.push({
+          id: `imp-p1-${Date.now()}-${topics.length}`,
+          part: IeLtsPart.Part1,
+          category: currentCategory,
+          title: line
+        });
+      }
+    } else {
+      if (p3Regex.test(line)) {
+        mode = 'part3';
+        continue;
+      }
+      if (categoryRegex.test(line)) {
+        mode = 'part2';
+        continue;
+      }
+
+      if (describeRegex.test(line)) {
+        mode = 'part2';
+        const newP2: Topic = {
+          id: `imp-p2-${Date.now()}-${topics.length}`,
+          part: IeLtsPart.Part2,
+          title: line,
+          description: ''
+        };
+        
+        const descLines = [];
+        let j = i + 1;
+        while (j < lines.length) {
+          const next = lines[j];
+          if (categoryRegex.test(next) || p3Regex.test(next) || describeRegex.test(next)) break;
+          descLines.push(next);
+          j++;
+        }
+        newP2.description = descLines.join('\n');
+        topics.push(newP2);
+        currentPart2Id = newP2.id;
+        
+        i = j - 1;
+        continue;
+      }
+
+      if (mode === 'part3' && currentPart2Id) {
+        topics.push({
+          id: `imp-p3-${Date.now()}-${topics.length}`,
+          part: IeLtsPart.Part3,
+          title: line,
+          relatedTopicId: currentPart2Id
+        });
+      }
+    }
+  }
+  return topics;
+};
+
 const Sidebar: React.FC<SidebarProps> = ({ 
   topics, 
   activeTopicId, 
@@ -37,32 +122,35 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSelectMockResult,
   onStartNewMock
 }) => {
-  const [isAdding, setIsAdding] = useState(false);
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'add' | 'edit' | 'import'>('add');
   const [isImporting, setIsImporting] = useState(false);
-  const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   
-  const [newTopicTitle, setNewTopicTitle] = useState('');
-  const [newTopicDesc, setNewTopicDesc] = useState('');
-  const [newTopicCategory, setNewTopicCategory] = useState('');
-  const [newTopicPart, setNewTopicPart] = useState<IeLtsPart>(IeLtsPart.Part1);
-  const [selectedPart2Parent, setSelectedPart2Parent] = useState('');
-  
+  // Form State
+  const [formData, setFormData] = useState({
+    id: '',
+    part: IeLtsPart.Part1 as IeLtsPart,
+    category: '',
+    title: '',
+    description: '',
+    relatedTopicId: '',
+    isStarred: false
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Expanded states
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
-  // Grouping & Sorting Logic
+  // Derived Data
   const sortTopics = (a: Topic, b: Topic) => (b.isStarred ? 1 : 0) - (a.isStarred ? 1 : 0);
-
   const part1Topics = topics.filter(t => t.part === IeLtsPart.Part1);
   const part2Topics = topics.filter(t => t.part === IeLtsPart.Part2).sort(sortTopics);
   const part3Topics = topics.filter(t => t.part === IeLtsPart.Part3);
 
-  // Extract Part 1 Categories and determine if they are starred
-  const part1CategoriesRaw = Array.from(new Set(part1Topics.map(t => t.category || 'General')));
-  
+  const part1CategoriesRaw = Array.from(new Set(part1Topics.map(t => t.category || 'General'))) as string[];
   const part1Categories = part1CategoriesRaw.map(cat => {
       const catTopics = part1Topics.filter(t => (t.category || 'General') === cat);
       const isStarred = catTopics.length > 0 && catTopics.every(t => t.isStarred);
@@ -71,6 +159,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const orphanPart3Topics = part3Topics.filter(p3 => !p3.relatedTopicId);
 
+  // Actions
   const toggleExpand = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setExpandedTopicId(expandedTopicId === id ? null : id);
@@ -80,25 +169,60 @@ const Sidebar: React.FC<SidebarProps> = ({
     setExpandedCategory(expandedCategory === cat ? null : cat);
   };
 
-  const resetForm = () => {
-    setNewTopicTitle('');
-    setNewTopicDesc('');
-    setNewTopicCategory('');
-    setSelectedPart2Parent('');
-    setNewTopicPart(IeLtsPart.Part1);
-    setEditingTopic(null);
+  const openAddModal = () => {
+    setModalMode('add');
+    setFormData({
+      id: Date.now().toString(),
+      part: IeLtsPart.Part1,
+      category: '',
+      title: '',
+      description: '',
+      relatedTopicId: '',
+      isStarred: false
+    });
+    setIsModalOpen(true);
   };
 
-  const handleEditClick = (e: React.MouseEvent, topic: Topic) => {
+  const openEditModal = (e: React.MouseEvent, topic: Topic) => {
     e.stopPropagation();
+    setModalMode('edit');
+    setFormData({
+      id: topic.id,
+      part: topic.part,
+      category: topic.category || '',
+      title: topic.title,
+      description: topic.description || '',
+      relatedTopicId: topic.relatedTopicId || '',
+      isStarred: topic.isStarred || false
+    });
+    setIsModalOpen(true);
+  };
+
+  const openImportModal = () => {
+    setModalMode('import');
+    setIsModalOpen(true);
+  };
+
+  const handleModalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsAdding(true);
-    setEditingTopic(topic);
-    setNewTopicPart(topic.part);
-    setNewTopicTitle(topic.title);
-    setNewTopicDesc(topic.description || '');
-    setNewTopicCategory(topic.category || '');
-    setSelectedPart2Parent(topic.relatedTopicId || '');
+    if (!formData.title.trim()) return;
+
+    const topicData: Topic = {
+      id: formData.id,
+      part: formData.part,
+      title: formData.title,
+      description: formData.description,
+      category: formData.part === IeLtsPart.Part1 ? (formData.category || 'General') : undefined,
+      relatedTopicId: formData.part === IeLtsPart.Part3 ? formData.relatedTopicId : undefined,
+      isStarred: formData.isStarred
+    };
+
+    if (modalMode === 'edit') {
+        onUpdateTopic(topicData);
+    } else {
+        onAddTopic(topicData);
+    }
+    setIsModalOpen(false);
   };
 
   const handleDeleteClick = (e: React.MouseEvent, id: string) => {
@@ -107,50 +231,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     onDeleteTopic(id);
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTopicTitle.trim()) return;
-
-    const topicData: Topic = {
-      id: editingTopic ? editingTopic.id : Date.now().toString(),
-      part: newTopicPart,
-      title: newTopicTitle,
-      description: newTopicDesc,
-      category: newTopicPart === IeLtsPart.Part1 ? (newTopicCategory || 'General') : undefined,
-      relatedTopicId: newTopicPart === IeLtsPart.Part3 ? selectedPart2Parent : undefined,
-      isStarred: editingTopic ? editingTopic.isStarred : false
-    };
-
-    if (editingTopic) {
-        onUpdateTopic(topicData);
-    } else {
-        onAddTopic(topicData);
-    }
-    
-    setIsAdding(false);
-    resetForm();
-  };
-
-  const handleImportClick = () => {
-    if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Ensure clean slate
-        fileInputRef.current.click();
-    }
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      e.target.value = '';
-
       if (!file.name.toLowerCase().endsWith('.docx') && 
           file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          alert("文件格式错误，请上传word文档");
+          alert("Please upload a .docx file");
           return;
       }
 
       setIsImporting(true);
+      // Close modal if open to show loading overlay
+      setIsModalOpen(false); 
 
       const reader = new FileReader();
       reader.onload = async (event) => {
@@ -163,27 +256,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               
               if (!text) throw new Error("Document is empty");
 
-              let topicsToImport: Topic[] = [];
-
-              try {
-                  const json = JSON.parse(text);
-                  if (Array.isArray(json)) {
-                      topicsToImport = json;
-                  }
-              } catch (e) {
-                  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-                  topicsToImport = lines.map((line, index) => {
-                      return {
-                          id: `doc-imported-${Date.now()}-${index}`,
-                          part: IeLtsPart.Part1,
-                          title: line,
-                          category: 'Imported Word Doc'
-                      };
-                  });
-              }
+              const topicsToImport = parseImportedDoc(text);
 
               if (topicsToImport.length === 0) {
-                   throw new Error("No valid topics found in document.");
+                   throw new Error("No valid topics found. Ensure document has 'Part 1' or 'Part 2' headers.");
               }
 
               setTimeout(() => {
@@ -198,20 +274,17 @@ const Sidebar: React.FC<SidebarProps> = ({
           }
       };
       
-      reader.onerror = () => {
-          alert("Error reading file.");
-          setIsImporting(false);
-      };
-      
       reader.readAsArrayBuffer(file);
+      // Reset input
+      e.target.value = '';
   };
 
-  // Render Action Buttons
+  // Render Helpers
   const renderActions = (topic: Topic) => (
       <div className="flex items-center gap-1 ml-2 relative z-20 shrink-0">
           <button 
              type="button"
-             onClick={(e) => handleEditClick(e, topic)}
+             onClick={(e) => openEditModal(e, topic)}
              className="p-1.5 hover:bg-slate-200 rounded text-slate-300 hover:text-blue-500 transition-colors"
              title="Edit"
           >
@@ -244,6 +317,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="w-80 bg-white border-r border-slate-200 h-full flex flex-col flex-shrink-0 z-10 shadow-sm relative">
+      
+      {/* Importing Overlay */}
       {isImporting && (
           <div className="absolute inset-0 bg-white/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
               <svg className="animate-spin h-8 w-8 text-blue-600 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -251,6 +326,152 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               <span className="text-sm font-bold text-slate-600">Importing document...</span>
+          </div>
+      )}
+
+      {/* Modal Dialog */}
+      {isModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px] p-4 animate-in fade-in duration-200">
+             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+                 {/* Modal Header */}
+                 <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-white">
+                     <div>
+                        <h3 className="font-bold text-xl text-slate-800">
+                            {modalMode === 'add' ? 'Add New Question' : modalMode === 'edit' ? 'Edit Question' : 'Import Questions'}
+                        </h3>
+                        <p className="text-sm text-slate-400 mt-0.5">
+                            {modalMode === 'add' ? 'Add a new question to the question bank' : modalMode === 'edit' ? 'Update question details' : 'Import from Word document'}
+                        </p>
+                     </div>
+                     <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 hover:bg-slate-50 p-2 rounded-full transition-all">
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                     </button>
+                 </div>
+                 
+                 {/* Modal Body */}
+                 <div className="p-6 bg-white">
+                     {modalMode === 'import' ? (
+                         <div 
+                           className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-slate-300 rounded-xl hover:bg-slate-50 hover:border-blue-400 transition-all cursor-pointer group" 
+                           onClick={() => fileInputRef.current?.click()}
+                         >
+                             <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                             </div>
+                             <p className="text-slate-700 font-bold mb-1">Click to upload Word file</p>
+                             <p className="text-xs text-slate-400">Supports .docx files with Part 1/2/3 headers</p>
+                             <input 
+                                ref={fileInputRef} 
+                                type="file" 
+                                className="hidden" 
+                                accept=".docx" 
+                                onChange={handleFileChange}
+                             />
+                         </div>
+                     ) : (
+                         <form id="topicForm" onSubmit={handleModalSubmit} className="space-y-5">
+                             <div className="grid grid-cols-2 gap-4">
+                                 <div>
+                                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 ml-1">Part</label>
+                                     <div className="relative">
+                                        <select 
+                                            value={formData.part}
+                                            onChange={(e) => setFormData({...formData, part: e.target.value as IeLtsPart})}
+                                            className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                        >
+                                            <option value={IeLtsPart.Part1}>Part 1</option>
+                                            <option value={IeLtsPart.Part2}>Part 2</option>
+                                            <option value={IeLtsPart.Part3}>Part 3</option>
+                                        </select>
+                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        </div>
+                                     </div>
+                                 </div>
+                                 
+                                 {formData.part === IeLtsPart.Part1 && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 ml-1">Topic Category</label>
+                                        <input 
+                                            type="text"
+                                            value={formData.category}
+                                            onChange={(e) => setFormData({...formData, category: e.target.value})}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                            placeholder="e.g. Hometown, Work"
+                                        />
+                                    </div>
+                                 )}
+                                 
+                                 {formData.part === IeLtsPart.Part3 && (
+                                     <div>
+                                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 ml-1">Parent Topic</label>
+                                         <div className="relative">
+                                            <select 
+                                                value={formData.relatedTopicId}
+                                                onChange={(e) => setFormData({...formData, relatedTopicId: e.target.value})}
+                                                className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                            >
+                                                <option value="">-- Select --</option>
+                                                {part2Topics.map(p2 => (
+                                                    <option key={p2.id} value={p2.id}>{p2.title}</option>
+                                                ))}
+                                            </select>
+                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                            </div>
+                                         </div>
+                                     </div>
+                                 )}
+                             </div>
+
+                             <div>
+                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 ml-1">
+                                    {formData.part === IeLtsPart.Part2 ? "Topic Title" : "Question"}
+                                 </label>
+                                 <input 
+                                    type="text" 
+                                    value={formData.title}
+                                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+                                    placeholder={formData.part === IeLtsPart.Part2 ? "e.g. Describe a traditional festival" : "Enter the question..."}
+                                    required
+                                 />
+                             </div>
+                             
+                             {formData.part === IeLtsPart.Part2 && (
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 ml-1">Cue Card Points</label>
+                                    <textarea
+                                        value={formData.description}
+                                        onChange={(e) => setFormData({...formData, description: e.target.value})}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[120px] resize-none"
+                                        placeholder="You should say:&#10;- What it is&#10;- When it is..."
+                                    />
+                                </div>
+                             )}
+                         </form>
+                     )}
+                 </div>
+
+                 {/* Modal Footer */}
+                 {modalMode !== 'import' && (
+                     <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                         <button 
+                             onClick={() => setIsModalOpen(false)} 
+                             className="px-5 py-2.5 text-slate-600 font-bold bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg text-sm transition-all"
+                         >
+                             Cancel
+                         </button>
+                         <button 
+                             form="topicForm" 
+                             type="submit" 
+                             className="px-5 py-2.5 bg-slate-900 text-white font-bold hover:bg-black rounded-lg text-sm shadow-md shadow-slate-200 transition-all transform active:scale-95"
+                         >
+                             {modalMode === 'add' ? 'Add Question' : 'Save Changes'}
+                         </button>
+                     </div>
+                 )}
+             </div>
           </div>
       )}
 
@@ -283,112 +504,28 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {activeMode === 'practice' ? (
         <>
-          <div className="px-4 py-3 flex items-center justify-between border-b border-slate-50">
-             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wide">Topic Library</h2>
+          <div className="px-4 py-3 flex items-center justify-between border-b border-slate-50 bg-white">
+             <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                 Question Bank
+                 <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full text-[10px]">{topics.length}</span>
+             </h2>
              <div className="flex items-center gap-1">
-                 <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept=".docx" 
-                    onChange={handleFileChange}
-                 />
                  <button 
-                    onClick={handleImportClick}
-                    className="text-slate-500 hover:bg-slate-100 p-1.5 rounded transition-colors"
-                    title="Import Word Doc"
+                    onClick={openImportModal}
+                    className="text-slate-400 hover:bg-slate-100 hover:text-blue-600 p-1.5 rounded transition-all"
+                    title="Import Questions"
                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                  </button>
                  <button 
-                    onClick={() => { setIsAdding(!isAdding); resetForm(); }}
-                    className="text-blue-600 hover:bg-blue-50 p-1.5 rounded transition-colors"
-                    title="Add Custom Topic"
+                    onClick={openAddModal}
+                    className="text-slate-400 hover:bg-slate-100 hover:text-blue-600 p-1.5 rounded transition-all"
+                    title="Add Question"
                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                  </button>
              </div>
           </div>
-
-          {isAdding && (
-            <div className="p-4 bg-slate-50 border-b border-slate-200 animate-in slide-in-from-top-2">
-              <form onSubmit={handleAddSubmit} className="space-y-3">
-                <div>
-                  <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Select Part</label>
-                  <select 
-                    value={newTopicPart}
-                    onChange={(e) => setNewTopicPart(e.target.value as IeLtsPart)}
-                    className="w-full text-sm border-slate-300 rounded-md p-2"
-                  >
-                    <option value={IeLtsPart.Part1}>Part 1</option>
-                    <option value={IeLtsPart.Part2}>Part 2</option>
-                    <option value={IeLtsPart.Part3}>Part 3</option>
-                  </select>
-                </div>
-
-                {newTopicPart === IeLtsPart.Part1 && (
-                    <input 
-                      type="text" 
-                      value={newTopicCategory}
-                      onChange={(e) => setNewTopicCategory(e.target.value)}
-                      className="w-full text-sm border-slate-300 rounded-md p-2"
-                      placeholder="Category (e.g. Work, Home)"
-                    />
-                )}
-
-                {newTopicPart === IeLtsPart.Part3 && (
-                    <div>
-                       <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Link to Part 2 Topic</label>
-                       <select 
-                          value={selectedPart2Parent}
-                          onChange={(e) => setSelectedPart2Parent(e.target.value)}
-                          className="w-full text-sm border-slate-300 rounded-md p-2"
-                          required
-                       >
-                          <option value="">-- Select Part 2 Parent --</option>
-                          {part2Topics.map(p2 => (
-                              <option key={p2.id} value={p2.id}>{p2.title}</option>
-                          ))}
-                       </select>
-                    </div>
-                )}
-
-                <div>
-                   <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                      {newTopicPart === IeLtsPart.Part2 ? "Topic Theme" : "Question"}
-                   </label>
-                   <input 
-                    type="text" 
-                    value={newTopicTitle}
-                    onChange={(e) => setNewTopicTitle(e.target.value)}
-                    className="w-full text-sm border-slate-300 rounded-md p-2"
-                    placeholder={newTopicPart === IeLtsPart.Part2 ? "e.g., A Traditional Festival" : "Question text..."}
-                    required
-                  />
-                </div>
-                
-                {newTopicPart === IeLtsPart.Part2 && (
-                   <div>
-                       <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Cue Card Description</label>
-                       <textarea
-                          value={newTopicDesc}
-                          onChange={(e) => setNewTopicDesc(e.target.value)}
-                          className="w-full text-sm border-slate-300 rounded-md p-2 h-20"
-                          placeholder="You should say:&#10;- What it is&#10;- When it is..."
-                          required
-                       />
-                   </div>
-                )}
-
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-blue-600 text-white text-xs py-2 rounded">
-                      {editingTopic ? 'Update' : 'Add'}
-                  </button>
-                  <button type="button" onClick={() => { setIsAdding(false); resetForm(); }} className="flex-1 bg-white border border-slate-300 text-xs py-2 rounded">Cancel</button>
-                </div>
-              </form>
-            </div>
-          )}
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6">
             {/* Part 1 Categories */}
@@ -462,7 +599,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                           onClick={() => onSelectTopic(p2)}
                        >
                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            {/* Star on Left */}
                             <StarIcon 
                                 isStarred={p2.isStarred || false} 
                                 onClick={(e) => { e.stopPropagation(); onToggleStar(p2.id); }} 
@@ -481,7 +617,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                          {renderActions(p2)}
                        </div>
                        
-                       {/* Nested Part 3s */}
                        {isExpanded && relatedPart3s.length > 0 && (
                          <div className="pl-6 space-y-1 border-l-2 border-slate-100 ml-3">
                            {relatedPart3s.map(p3 => (
