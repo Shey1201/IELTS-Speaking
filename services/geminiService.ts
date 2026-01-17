@@ -133,8 +133,8 @@ export const evaluateAudio = async (
     1. SCORING: Be EXTREMELY STRICT. Follow official IELTS Band Descriptors closely. Do not inflate scores. Most average students score 5.5-6.5.
     2. SPEED: Keep the analysis concise and direct to ensure fast generation.
     3. IMPROVEMENTS: Generate improved versions ONLY for Band 6.0 and Band 7.0.
-       - Band 6.0: Simple, correct grammar, direct answer.
-       - Band 7.0: Natural flow, idiomatic vocabulary, complex structures.
+       - Band 6.0: Simple, everyday conversational language, correct grammar, direct answer, authentic feeling (avoid complex/academic words).
+       - Band 7.0: Natural native flow, idiomatic vocabulary, complex structures, detailed elaboration.
     
     TASK 1: Transcribe the audio word-for-word.
     TASK 2: Analyze the transcript for highlights (LR, GRA, PR).

@@ -140,9 +140,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // Expanded states
+  // Expanded states for individual topics/categories
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
+  // Main Section Expanded States
+  const [isPart1Expanded, setIsPart1Expanded] = useState(true);
+  const [isPart23Expanded, setIsPart23Expanded] = useState(true);
 
   // Derived Data
   const sortTopics = (a: Topic, b: Topic) => (b.isStarred ? 1 : 0) - (a.isStarred ? 1 : 0);
@@ -530,138 +534,172 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex-1 overflow-y-auto p-4 space-y-6">
             {/* Part 1 Categories */}
             <div>
-               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Part 1</h2>
-               <div className="space-y-1">
-                 {part1Categories.map(({ name: cat, isStarred }) => {
-                    const catTopics = part1Topics.filter(t => (t.category || 'General') === cat);
-                    const isExpanded = expandedCategory === cat;
-
-                    return (
-                        <div key={cat} className="space-y-1">
-                             <div className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm transition-all duration-200 font-medium ${
-                                    isExpanded ? 'bg-slate-100 text-slate-800' : 'text-slate-600 hover:bg-slate-50'
-                                }`}
-                             >
-                                <div className="flex items-center flex-1" onClick={() => toggleCategory(cat)}>
-                                    <StarIcon 
-                                        isStarred={isStarred || false} 
-                                        onClick={(e) => { e.stopPropagation(); onToggleCategoryStar(cat); }} 
-                                    />
-                                    <button className="flex items-center gap-2 flex-1 text-left">
-                                        {cat}
-                                    </button>
-                                </div>
-                                <button onClick={() => toggleCategory(cat)} className="p-1">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform text-slate-400 ${isExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                </button>
-                             </div>
-
-                             {isExpanded && (
-                                 <div className="ml-7 pl-3 border-l-2 border-slate-100 space-y-1 py-1">
-                                     {catTopics.map(topic => (
-                                         <div 
-                                           key={topic.id}
-                                           className={`group flex items-center justify-between w-full px-3 py-2 rounded text-sm transition-all cursor-pointer relative ${
-                                                activeTopicId === topic.id 
-                                                ? 'bg-blue-50 text-blue-700 font-medium' 
-                                                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                                            }`}
-                                           onClick={() => onSelectTopic(topic)}
-                                         >
-                                            <span className="truncate flex-1 text-left">{topic.title}</span>
-                                            {renderActions(topic)}
-                                         </div>
-                                     ))}
-                                 </div>
-                             )}
-                        </div>
-                    );
-                 })}
+               <div 
+                  className="flex items-center justify-between cursor-pointer mb-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg group transition-colors"
+                  onClick={() => setIsPart1Expanded(!isPart1Expanded)}
+               >
+                   <h2 className="text-base font-black text-slate-900 uppercase tracking-wide">Part 1</h2>
+                   <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      width="16" height="16" viewBox="0 0 24 24" 
+                      fill="none" stroke="currentColor" strokeWidth="2.5" 
+                      strokeLinecap="round" strokeLinejoin="round" 
+                      className={`text-slate-400 group-hover:text-slate-600 transition-transform duration-200 ${isPart1Expanded ? 'rotate-180' : ''}`}
+                   >
+                       <polyline points="6 9 12 15 18 9"></polyline>
+                   </svg>
                </div>
+               
+               {isPart1Expanded && (
+                   <div className="space-y-1 animate-in slide-in-from-top-1 fade-in duration-200">
+                     {part1Categories.map(({ name: cat, isStarred }) => {
+                        const catTopics = part1Topics.filter(t => (t.category || 'General') === cat);
+                        const isExpanded = expandedCategory === cat;
+
+                        return (
+                            <div key={cat} className="space-y-1">
+                                 <div className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-sm transition-all duration-200 font-medium ${
+                                        isExpanded ? 'bg-slate-100 text-slate-800' : 'text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                 >
+                                    <div className="flex items-center flex-1" onClick={() => toggleCategory(cat)}>
+                                        <StarIcon 
+                                            isStarred={isStarred || false} 
+                                            onClick={(e) => { e.stopPropagation(); onToggleCategoryStar(cat); }} 
+                                        />
+                                        <button className="flex items-center gap-2 flex-1 text-left">
+                                            {cat}
+                                        </button>
+                                    </div>
+                                    <button onClick={() => toggleCategory(cat)} className="p-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform text-slate-400 ${isExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </button>
+                                 </div>
+
+                                 {isExpanded && (
+                                     <div className="ml-7 pl-3 border-l-2 border-slate-100 space-y-1 py-1">
+                                         {catTopics.map(topic => (
+                                             <div 
+                                               key={topic.id}
+                                               className={`group flex items-center justify-between w-full px-3 py-2 rounded text-sm transition-all cursor-pointer relative ${
+                                                    activeTopicId === topic.id 
+                                                    ? 'bg-blue-50 text-blue-700 font-medium' 
+                                                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                                                }`}
+                                               onClick={() => onSelectTopic(topic)}
+                                             >
+                                                <span className="truncate flex-1 text-left">{topic.title}</span>
+                                                {renderActions(topic)}
+                                             </div>
+                                         ))}
+                                     </div>
+                                 )}
+                            </div>
+                        );
+                     })}
+                   </div>
+               )}
             </div>
 
             {/* Part 2 & Part 3 Nested */}
-            <div>
-               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Part 2 & 3</h2>
-               <div className="space-y-1">
-                 {part2Topics.map(p2 => {
-                   const relatedPart3s = part3Topics.filter(p3 => p3.relatedTopicId === p2.id);
-                   const isExpanded = expandedTopicId === p2.id || activeTopicId === p2.id || relatedPart3s.some(p3 => p3.id === activeTopicId);
-                   
-                   return (
-                     <div key={p2.id} className="space-y-1">
-                       <div 
-                          className={`group w-full flex items-center justify-between px-2 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer relative ${
-                            activeTopicId === p2.id 
-                            ? 'bg-blue-50 text-blue-700 font-medium shadow-sm border border-blue-100' 
-                            : 'text-slate-600 hover:bg-slate-100'
-                          }`}
-                          onClick={() => onSelectTopic(p2)}
-                       >
-                         <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <StarIcon 
-                                isStarred={p2.isStarred || false} 
-                                onClick={(e) => { e.stopPropagation(); onToggleStar(p2.id); }} 
-                            />
-
-                            <span className="truncate flex-1 text-left">{p2.title}</span>
-                            {relatedPart3s.length > 0 && (
-                                <button 
-                                    onClick={(e) => toggleExpand(p2.id, e)}
-                                    className="p-1 rounded hover:bg-slate-200 text-slate-400"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6"></polyline></svg>
-                                </button>
-                            )}
-                         </div>
-                         {renderActions(p2)}
-                       </div>
-                       
-                       {isExpanded && relatedPart3s.length > 0 && (
-                         <div className="pl-6 space-y-1 border-l-2 border-slate-100 ml-3">
-                           {relatedPart3s.map(p3 => (
-                             <div
-                               key={p3.id}
-                               onClick={() => onSelectTopic(p3)}
-                               className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg text-xs transition-all duration-200 cursor-pointer relative ${
-                                 activeTopicId === p3.id 
-                                   ? 'bg-indigo-50 text-indigo-700 font-medium' 
-                                   : 'text-slate-500 hover:bg-slate-50'
-                               }`}
-                             >
-                               <div className="flex items-center flex-1 min-w-0">
-                                   <span className="text-[10px] uppercase font-bold text-slate-300 mr-1 flex-shrink-0">P3</span>
-                                   <span className="truncate">{p3.title}</span>
-                               </div>
-                               {renderActions(p3)}
-                             </div>
-                           ))}
-                         </div>
-                       )}
-                     </div>
-                   );
-                 })}
-                 
-                 {orphanPart3Topics.length > 0 && (
-                   <div className="pt-2 border-t border-slate-100 mt-2">
-                      <p className="text-[10px] font-bold text-slate-300 uppercase px-2 mb-1">Misc Part 3</p>
-                      {orphanPart3Topics.map(p3 => (
-                        <div
-                          key={p3.id}
-                          onClick={() => onSelectTopic(p3)}
-                          className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer relative ${
-                            activeTopicId === p3.id 
-                              ? 'bg-blue-50 text-blue-700 font-medium' 
-                              : 'text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className="truncate flex-1">{p3.title}</span>
-                          {renderActions(p3)}
-                        </div>
-                      ))}
-                   </div>
-                 )}
+            <div className="mt-4">
+               <div 
+                  className="flex items-center justify-between cursor-pointer mb-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg group transition-colors"
+                  onClick={() => setIsPart23Expanded(!isPart23Expanded)}
+               >
+                   <h2 className="text-base font-black text-slate-900 uppercase tracking-wide">Part 2 & 3</h2>
+                   <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      width="16" height="16" viewBox="0 0 24 24" 
+                      fill="none" stroke="currentColor" strokeWidth="2.5" 
+                      strokeLinecap="round" strokeLinejoin="round" 
+                      className={`text-slate-400 group-hover:text-slate-600 transition-transform duration-200 ${isPart23Expanded ? 'rotate-180' : ''}`}
+                   >
+                       <polyline points="6 9 12 15 18 9"></polyline>
+                   </svg>
                </div>
+
+               {isPart23Expanded && (
+                   <div className="space-y-1 animate-in slide-in-from-top-1 fade-in duration-200">
+                     {part2Topics.map(p2 => {
+                       const relatedPart3s = part3Topics.filter(p3 => p3.relatedTopicId === p2.id);
+                       const isExpanded = expandedTopicId === p2.id || activeTopicId === p2.id || relatedPart3s.some(p3 => p3.id === activeTopicId);
+                       
+                       return (
+                         <div key={p2.id} className="space-y-1">
+                           <div 
+                              className={`group w-full flex items-center justify-between px-2 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer relative ${
+                                activeTopicId === p2.id 
+                                ? 'bg-blue-50 text-blue-700 font-medium shadow-sm border border-blue-100' 
+                                : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                              onClick={() => onSelectTopic(p2)}
+                           >
+                             <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <StarIcon 
+                                    isStarred={p2.isStarred || false} 
+                                    onClick={(e) => { e.stopPropagation(); onToggleStar(p2.id); }} 
+                                />
+
+                                <span className="truncate flex-1 text-left">{p2.title}</span>
+                                {relatedPart3s.length > 0 && (
+                                    <button 
+                                        onClick={(e) => toggleExpand(p2.id, e)}
+                                        className="p-1 rounded hover:bg-slate-200 text-slate-400"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                    </button>
+                                )}
+                             </div>
+                             {renderActions(p2)}
+                           </div>
+                           
+                           {isExpanded && relatedPart3s.length > 0 && (
+                             <div className="pl-6 space-y-1 border-l-2 border-slate-100 ml-3">
+                               {relatedPart3s.map(p3 => (
+                                 <div
+                                   key={p3.id}
+                                   onClick={() => onSelectTopic(p3)}
+                                   className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg text-xs transition-all duration-200 cursor-pointer relative ${
+                                     activeTopicId === p3.id 
+                                       ? 'bg-indigo-50 text-indigo-700 font-medium' 
+                                       : 'text-slate-500 hover:bg-slate-50'
+                                   }`}
+                                 >
+                                   <div className="flex items-center flex-1 min-w-0">
+                                       <span className="text-[10px] uppercase font-bold text-slate-300 mr-1 flex-shrink-0">P3</span>
+                                       <span className="truncate">{p3.title}</span>
+                                   </div>
+                                   {renderActions(p3)}
+                                 </div>
+                               ))}
+                             </div>
+                           )}
+                         </div>
+                       );
+                     })}
+                     
+                     {orphanPart3Topics.length > 0 && (
+                       <div className="pt-2 border-t border-slate-100 mt-2">
+                          <p className="text-[10px] font-bold text-slate-300 uppercase px-2 mb-1">Misc Part 3</p>
+                          {orphanPart3Topics.map(p3 => (
+                            <div
+                              key={p3.id}
+                              onClick={() => onSelectTopic(p3)}
+                              className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer relative ${
+                                activeTopicId === p3.id 
+                                  ? 'bg-blue-50 text-blue-700 font-medium' 
+                                  : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span className="truncate flex-1">{p3.title}</span>
+                              {renderActions(p3)}
+                            </div>
+                          ))}
+                       </div>
+                     )}
+                   </div>
+               )}
             </div>
           </div>
         </>

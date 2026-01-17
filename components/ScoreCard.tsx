@@ -13,6 +13,7 @@ interface ScoreCardProps {
 const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart, previousScore, onRetry }) => {
   const { score, transcript, improvedVersions, part3Suggestions, feedbackDetail } = result;
   const [activeTab, setActiveTab] = useState<'fc' | 'lr' | 'gra' | 'pr'>('gra');
+  const [demoBand, setDemoBand] = useState<number>(7.0);
 
   const speakText = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -46,9 +47,8 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
      return { graErrors, lrImprovements, prErrors, fillerCounts, totalFillers };
   }, [transcript]);
 
-  // Determine the best model answer to show
-  const modelAnswer = improvedVersions.find(v => v.band >= 8.0) || improvedVersions.find(v => v.band === 7.0) || improvedVersions[0];
-  const modelBand = modelAnswer?.band || 9.0;
+  // Determine the best model answer to show based on selection
+  const modelAnswer = improvedVersions.find(v => v.band === demoBand) || improvedVersions.find(v => v.band === 7.0) || improvedVersions[0];
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-12">
@@ -290,24 +290,46 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
         {/* 4. Model Answer (PRO Design) */}
         {modelAnswer && (
             <div className="bg-blue-50/80 rounded-2xl p-6 border border-blue-100">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                    <div className="flex items-center gap-2">
-                        <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded">PRO</span>
-                        <h3 className="font-bold text-slate-800 text-lg">
-                            Native Speaker Demo (Band {modelBand.toFixed(1)})
-                        </h3>
+                <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                         {/* Play Button at the front */}
+                         <button 
+                            onClick={() => speakText(modelAnswer.text)}
+                            className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white shadow-md hover:bg-blue-700 hover:scale-110 transition-all"
+                            title="Shadowing Play"
+                        >
+                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                        </button>
+
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">PRO</span>
+                                <h3 className="font-bold text-slate-800 text-lg">
+                                    Native Demo
+                                </h3>
+                            </div>
+                        </div>
                     </div>
-                    <button 
-                        onClick={() => speakText(modelAnswer.text)}
-                        className="flex items-center gap-2 bg-white text-blue-600 px-4 py-2 rounded-lg border border-blue-200 text-sm font-bold shadow-sm hover:shadow-md transition-all active:scale-95 group"
-                    >
-                         <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
-                         Shadowing Play
-                    </button>
+
+                    {/* Band Switcher */}
+                    <div className="flex bg-white rounded-lg p-1 border border-blue-100 shadow-sm">
+                        <button 
+                            onClick={() => setDemoBand(6.0)}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${demoBand === 6.0 ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            Band 6.0 (Simple)
+                        </button>
+                        <button 
+                            onClick={() => setDemoBand(7.0)}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${demoBand === 7.0 ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            Band 7.0 (Native)
+                        </button>
+                    </div>
                 </div>
                 
                 <div className="bg-white rounded-xl p-6 border border-blue-100/50 shadow-sm relative">
-                    <p className="text-slate-700 leading-relaxed italic text-lg font-medium text-slate-600">
+                    <p className="text-slate-700 leading-relaxed text-lg">
                         "{modelAnswer.text}"
                     </p>
                 </div>

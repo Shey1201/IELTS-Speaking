@@ -5,17 +5,19 @@ import Recorder from './components/Recorder';
 import ScoreCard from './components/ScoreCard';
 import MockExam from './components/MockExam';
 import MockResultView from './components/MockResultView';
-import { INITIAL_TOPICS } from './constants';
 import { Topic, EvaluationResult, MockQuestion, IeLtsPart, MockExamResult } from './types';
 import { evaluateAudio, generateMockTest, evaluateMockTest, convertTextToSpeech } from './services/geminiService';
+import { loadTopics, saveTopics, loadMockHistory, saveMockHistory } from './services/storageService';
 
 const App: React.FC = () => {
   // Navigation State
   const [activeMode, setActiveMode] = useState<'practice' | 'mock'>('practice');
 
   // Practice Mode State
-  const [topics, setTopics] = useState<Topic[]>(INITIAL_TOPICS);
-  const [activeTopic, setActiveTopic] = useState<Topic | null>(INITIAL_TOPICS[0]);
+  // Initialize from storage or fall back to constants inside loadTopics()
+  const [topics, setTopics] = useState<Topic[]>(() => loadTopics());
+  const [activeTopic, setActiveTopic] = useState<Topic | null>(null);
+  
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,10 +30,26 @@ const App: React.FC = () => {
   // Mock Exam State
   const [isMockRunning, setIsMockRunning] = useState(false);
   const [mockQuestions, setMockQuestions] = useState<MockQuestion[]>([]);
-  const [mockHistory, setMockHistory] = useState<MockExamResult[]>([]);
+  const [mockHistory, setMockHistory] = useState<MockExamResult[]>(() => loadMockHistory());
   const [selectedMockResult, setSelectedMockResult] = useState<MockExamResult | null>(null);
   const [isLoadingMock, setIsLoadingMock] = useState(false);
   const [isGradingMock, setIsGradingMock] = useState(false);
+
+  // --- Persistence Effects ---
+  useEffect(() => {
+    saveTopics(topics);
+  }, [topics]);
+
+  useEffect(() => {
+    saveMockHistory(mockHistory);
+  }, [mockHistory]);
+
+  // Set initial active topic if none selected and topics exist
+  useEffect(() => {
+    if (!activeTopic && topics.length > 0) {
+      setActiveTopic(topics[0]);
+    }
+  }, []); // Run once on mount
 
   // --- Effects ---
   useEffect(() => {
@@ -43,7 +61,7 @@ const App: React.FC = () => {
 
   const handleTopicSelect = (topic: Topic) => {
     setActiveTopic(topic);
-    setPreviousScore(result?.score.overall); // Store previous score locally for instant comparison if switching topics (or keep per topic if implementing persistence)
+    setPreviousScore(result?.score.overall); // Store previous score locally for instant comparison if switching topics
     setResult(null);
     setError(null);
   };
@@ -51,7 +69,6 @@ const App: React.FC = () => {
   const handleRetry = () => {
     setResult(null);
     setError(null);
-    // Keep activeTopic same, just reset result to show recorder again
   };
 
   const handleAddTopic = (newTopic: Topic) => {
@@ -74,20 +91,73 @@ const App: React.FC = () => {
   };
 
   const handleImportTopics = (newTopics: Topic[]) => {
-      const safeTopics = newTopics.map(t => ({
+      // 1. Normalize Imported Data
+      const imported = newTopics.map(t => ({
           ...t,
-          id: t.id ? String(t.id) : `imported-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: t.id || `imported-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           part: normalizePart(t.part || 'Part 1'),
-          title: t.title || 'Untitled Topic',
-          category: t.category || (t.part === IeLtsPart.Part1 ? 'General' : undefined)
+          title: t.title ? t.title.trim() : 'Untitled Topic',
+          category: t.category ? t.category.trim() : (t.part === IeLtsPart.Part1 ? 'General' : undefined),
+          description: t.description ? t.description.trim() : undefined
       }));
       
       setTopics(prev => {
-          const updated = [...prev, ...safeTopics];
-          return updated;
+          const nextTopics = [...prev];
+          let added = 0;
+          let updated = 0;
+          
+          // Map to track ID resolution for relationships (Part 3 -> Part 2)
+          // Key: ID from the import file/parser
+          // Value: ID in the final state (either existing ID from prev or new ID)
+          const idMap = new Map<string, string>();
+
+          imported.forEach(importTopic => {
+              // Resolve relatedTopicId if it exists (for Part 3)
+              let resolvedRelatedId = importTopic.relatedTopicId;
+              if (resolvedRelatedId && idMap.has(resolvedRelatedId)) {
+                  resolvedRelatedId = idMap.get(resolvedRelatedId);
+              }
+
+              // Check for duplicates (Same Part + Same Title case-insensitive)
+              const matchIndex = nextTopics.findIndex(t => 
+                  t.part === importTopic.part && 
+                  t.title.toLowerCase() === importTopic.title.toLowerCase()
+              );
+
+              if (matchIndex >= 0) {
+                  // Match found: Update existing
+                  const existingId = nextTopics[matchIndex].id;
+                  
+                  // Map the import ID to the existing ID so subsequent Part 3s point to this existing Part 2
+                  idMap.set(importTopic.id, existingId);
+
+                  nextTopics[matchIndex] = {
+                      ...nextTopics[matchIndex],
+                      // Overwrite fields if present in import
+                      description: importTopic.description || nextTopics[matchIndex].description,
+                      category: importTopic.category || nextTopics[matchIndex].category,
+                      relatedTopicId: resolvedRelatedId || nextTopics[matchIndex].relatedTopicId
+                      // Preserve existing ID and isStarred status
+                  };
+                  updated++;
+              } else {
+                  // No match: Add new
+                  const topicToAdd = {
+                      ...importTopic,
+                      relatedTopicId: resolvedRelatedId
+                  };
+                  
+                  // Map import ID to itself (it's being added as is)
+                  idMap.set(importTopic.id, topicToAdd.id);
+                  
+                  nextTopics.push(topicToAdd);
+                  added++;
+              }
+          });
+
+          setTimeout(() => alert(`Import Complete:\n• Added: ${added} new topics\n• Updated: ${updated} existing topics`), 100);
+          return nextTopics;
       });
-      
-      alert(`Successfully imported ${safeTopics.length} topics.`);
   };
 
   const handleDeleteTopic = (id: string) => {
