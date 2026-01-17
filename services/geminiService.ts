@@ -25,14 +25,18 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Retry wrapper for network flakes
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+// Robust Retry wrapper for 429 errors
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
-    if (retries === 0) throw error;
-    console.warn(`API Call failed. Retrying... (${retries} attempts left). Error: ${error.message}`);
+    const isRateLimit = error.message?.includes('429') || error.status === 429 || error.message?.includes('quota');
+    
+    if (retries === 0 || !isRateLimit) throw error;
+    
+    console.warn(`Quota limit hit (429). Pausing for ${delay}ms before retry... (${retries} attempts left).`);
     await new Promise(resolve => setTimeout(resolve, delay));
+    // Exponential backoff: 2s -> 4s -> 8s
     return withRetry(fn, retries - 1, delay * 2);
   }
 }
@@ -56,13 +60,11 @@ const decodeAudioData = async (base64Data: string): Promise<AudioBuffer> => {
     bytes[i] = binaryString.charCodeAt(i);
   }
 
-  // IMPORTANT: decodeAudioData detaches the buffer. We must clone it if we want to use it in the catch block.
   const bufferForFallback = bytes.buffer.slice(0);
 
   try {
      return await audioContext.decodeAudioData(bytes.buffer);
   } catch (e) {
-     // Use the clone here because bytes.buffer is likely detached
      const dataInt16 = new Int16Array(bufferForFallback);
      const buffer = audioContext.createBuffer(1, dataInt16.length, 24000);
      const channelData = buffer.getChannelData(0);
@@ -76,10 +78,10 @@ const decodeAudioData = async (base64Data: string): Promise<AudioBuffer> => {
 export const convertTextToSpeech = async (text: string): Promise<void> => {
   const ai = getClient();
 
-  // Pre-process text to sound more human-like with pauses
+  // Optimized text processing for natural flow
   const processedText = text
-    .replace(/\n/g, '... ') 
-    .replace(/([.!?])\s/g, '$1... ');
+    .replace(/([.!?])\s/g, '$1 <break time="500ms"/> ') // Explicit pauses
+    .replace(/,/g, ', <break time="200ms"/> '); 
 
   try {
     const base64Audio = await withRetry(async () => {
@@ -90,13 +92,14 @@ export const convertTextToSpeech = async (text: string): Promise<void> => {
               responseModalities: [Modality.AUDIO],
               speechConfig: {
                   voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: 'Aoede' },
+                    // Switched to 'Puck' for a more natural, deep, human-like examiner voice
+                    prebuiltVoiceConfig: { voiceName: 'Puck' },
                   },
               },
             },
         });
         return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    });
+    }, 2, 1000); // Fewer retries for TTS to keep it snappy, but still retry once
 
     if (!base64Audio) throw new Error("No audio data returned");
 
@@ -110,6 +113,7 @@ export const convertTextToSpeech = async (text: string): Promise<void> => {
     }
   } catch (error) {
     console.error("TTS Error:", error);
+    // Fallback
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.9;
     window.speechSynthesis.speak(u);
@@ -125,59 +129,52 @@ export const evaluateAudio = async (
   const ai = getClient();
   const base64Audio = await blobToBase64(audioBlob);
 
-  // Optimized prompt for stricter scoring and faster response (limited bands)
+  // Optimized prompt for Band 6.5 ("Achievable")
   const prompt = `
-    You are a strict, professional IELTS Speaking Examiner. Evaluate this response for: "${topic.title}" (${topic.part}).
+    Role: Professional IELTS Speaking Examiner. Topic: "${topic.title}" (${topic.part}).
     
-    CRITICAL INSTRUCTIONS:
-    1. SCORING: Be EXTREMELY STRICT. Follow official IELTS Band Descriptors closely. Do not inflate scores. Most average students score 5.5-6.5.
-    2. SPEED: Keep the analysis concise and direct to ensure fast generation.
-    3. IMPROVEMENTS: Generate improved versions ONLY for Band 6.0 and Band 7.0.
-       - Band 6.0: Simple, everyday conversational language, correct grammar, direct answer, authentic feeling (avoid complex/academic words).
-       - Band 7.0: Natural native flow, idiomatic vocabulary, complex structures, detailed elaboration.
+    Instructions:
+    1. TRANSCRIPT: Accurate word-for-word.
+    2. SCORE: Strict grading (0-9). Average is 5.5-6.5.
+    3. ANALYSIS: Highlight key errors (Grammar, Pronunciation).
+    4. IMPROVEMENT: Generate ONE "Band 6.5" version. 
+       - Criteria: Natural, grammatically correct, clear, and achievable. 
+       - Avoid overly complex idioms or academic words. 
+       - It should be a strong, standard answer that a good student can actually mimic.
     
-    TASK 1: Transcribe the audio word-for-word.
-    TASK 2: Analyze the transcript for highlights (LR, GRA, PR).
-    TASK 3: Generate improved versions for Band 6.0 and 7.0.
-    TASK 4: Suggest 3 Part 3 questions (only if Part 2).
-
-    Output JSON STRICTLY matching this schema:
+    Output JSON (Minified):
     {
-      "score": { "fluencyCoherence": number, "lexicalResource": number, "grammaticalRange": number, "pronunciation": number, "overall": number },
+      "score": { "fluencyCoherence": 0, "lexicalResource": 0, "grammaticalRange": 0, "pronunciation": 0, "overall": 0 },
       "transcript": [
          { 
-           "text": string, 
-           "types": string[], // "lr", "gra", "pr"
-           "gra": { "error": string, "correction": string, "explanation": string } | null,
-           "lr": { "simple": string, "better": string[] } | null,
-           "pr": { "ipa": string, "error": boolean } | null
+           "text": "word", 
+           "types": [], 
+           "gra": { "error": "bad grammar", "correction": "correction", "explanation": "brief reason" } | null,
+           "lr": { "simple": "basic word", "better": ["better1", "better2"] } | null,
+           "pr": { "ipa": "ipa", "error": true } | null
          }
       ],
       "improvedVersions": [
          {
-           "band": number, // 6.0 or 7.0
-           "text": string,
-           "analysis": {
-              "fillers": string[],
-              "vocabulary": string[],
-              "reasoning": string
-           },
-           "audioText": string
+           "band": 6.5,
+           "text": "Full improved response text (Band 6.5 level)...",
+           "analysis": { "fillers": [], "vocabulary": [], "reasoning": "Why this is a solid Band 6.5" },
+           "audioText": "Text optimized for speech"
          }
       ],
-      "part3Suggestions": string[],
+      "part3Suggestions": ["Q1", "Q2", "Q3"], 
       "feedbackDetail": {
-         "fluency": { "issues": string[], "tips": string[] },
-         "lexical": { "betterWords": [{ "original": string, "better": string, "reason": string }], "tips": string[] },
-         "grammar": { "errors": [{ "error": string, "correction": string, "explanation": string }], "tips": string[] },
-         "pronunciation": { "mispronounced": string[], "tips": string[] }
+         "fluency": { "issues": [], "tips": [] },
+         "lexical": { "betterWords": [], "tips": [] },
+         "grammar": { "errors": [], "tips": [] },
+         "pronunciation": { "mispronounced": [], "tips": [] }
       }
     }
   `;
 
   return withRetry(async () => {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash', // Switched to 2.0 Flash for better availability
+        model: 'gemini-2.0-flash', 
         contents: {
           parts: [
             { inlineData: { mimeType: audioBlob.type || 'audio/webm', data: base64Audio } },
@@ -193,21 +190,14 @@ export const evaluateAudio = async (
       if (!text) throw new Error("No response from AI");
       const result = JSON.parse(text);
       
-      // Add timestamp
       return { ...result, timestamp: Date.now() } as EvaluationResult;
-  });
+  }, 4, 3000); 
 };
 
 export const generateMockTest = async (): Promise<MockQuestion[]> => {
   const ai = getClient();
   const prompt = `
-    Generate a full IELTS Speaking Mock Test.
-    JSON Output:
-    {
-      "part1": string[], 
-      "part2": { "topic": string, "bullets": string }, 
-      "part3": string[]
-    }
+    Generate IELTS Speaking Mock Test. JSON: { "part1": string[], "part2": { "topic": "s", "bullets": "s" }, "part3": string[] }
   `;
 
   return withRetry(async () => {
@@ -220,55 +210,21 @@ export const generateMockTest = async (): Promise<MockQuestion[]> => {
     const data = JSON.parse(response.text || '{}');
     const questions: MockQuestion[] = [];
 
-    if (data.part1) {
-        data.part1.forEach((q: string, i: number) => {
-        questions.push({ id: `mock-p1-${i}`, part: IeLtsPart.Part1, title: q, durationLimit: 30 });
-        });
-    }
-    if (data.part2) {
-        questions.push({
-        id: `mock-p2`, part: IeLtsPart.Part2, title: data.part2.topic, description: data.part2.bullets, prepTime: 60, durationLimit: 120
-        });
-    }
-    if (data.part3) {
-        data.part3.forEach((q: string, i: number) => {
-        questions.push({ id: `mock-p3-${i}`, part: IeLtsPart.Part3, title: q, durationLimit: 45 });
-        });
-    }
+    if (data.part1) data.part1.forEach((q: string, i: number) => questions.push({ id: `mock-p1-${i}`, part: IeLtsPart.Part1, title: q, durationLimit: 30 }));
+    if (data.part2) questions.push({ id: `mock-p2`, part: IeLtsPart.Part2, title: data.part2.topic, description: data.part2.bullets, prepTime: 60, durationLimit: 120 });
+    if (data.part3) data.part3.forEach((q: string, i: number) => questions.push({ id: `mock-p3-${i}`, part: IeLtsPart.Part3, title: q, durationLimit: 45 }));
     return questions;
   });
 };
 
-// Helper for Mock Evaluation per Part
-const evaluateMockPart = async (
-    ai: GoogleGenAI, 
-    partName: string, 
-    questions: MockQuestion[], 
-    blobs: Blob[]
-): Promise<PartResult> => {
-    
-    const audioParts: any[] = [];
-    audioParts.push({ text: `Evaluate these ${partName} responses.` });
-    
+const evaluateMockPart = async (ai: GoogleGenAI, partName: string, questions: MockQuestion[], blobs: Blob[]): Promise<PartResult> => {
+    const audioParts: any[] = [{ text: `Evaluate ${partName} strictly.` }];
     for (let i = 0; i < blobs.length; i++) {
         const b64 = await blobToBase64(blobs[i]);
-        audioParts.push({ text: `Question: ${questions[i].title}` });
+        audioParts.push({ text: `Q: ${questions[i].title}` });
         audioParts.push({ inlineData: { mimeType: 'audio/webm', data: b64 } });
     }
-
-    const prompt = `
-      Evaluate these ${partName} responses according to STRICT IELTS Speaking criteria.
-      
-      INSTRUCTION: Be critical. Do not give high scores (8.0/9.0) unless the English is native-level perfect. Average is 6.0.
-      
-      JSON Schema:
-      {
-        "score": number,
-        "dimensions": { "fluencyCoherence": number, "lexicalResource": number, "grammaticalRange": number, "pronunciation": number, "overall": number },
-        "analysis": string,
-        "improvements": string[]
-      }
-    `;
+    const prompt = `JSON Output: { "score": 0, "dimensions": { "fluencyCoherence": 0, "lexicalResource": 0, "grammaticalRange": 0, "pronunciation": 0, "overall": 0 }, "analysis": "summary", "improvements": [] }`;
     audioParts.push({ text: prompt });
 
     return withRetry(async () => {
@@ -278,12 +234,11 @@ const evaluateMockPart = async (
             config: { responseMimeType: "application/json" }
         });
         return JSON.parse(response.text || '{}') as PartResult;
-    }, 2);
+    }, 4, 3000);
 };
 
 export const evaluateMockTest = async (blobs: Blob[], questions: MockQuestion[]): Promise<MockExamResult> => {
   const ai = getClient();
-  
   const p1Qs = questions.filter(q => q.part === IeLtsPart.Part1);
   const p2Qs = questions.filter(q => q.part === IeLtsPart.Part2);
   const p3Qs = questions.filter(q => q.part === IeLtsPart.Part3);
@@ -294,40 +249,26 @@ export const evaluateMockTest = async (blobs: Blob[], questions: MockQuestion[])
   const p3Blobs = blobs.slice(cursor, cursor + p3Qs.length);
 
   try {
-      const p1Result = await evaluateMockPart(ai, "Part 1", p1Qs, p1Blobs);
-      const p2Result = await evaluateMockPart(ai, "Part 2", p2Qs, p2Blobs);
-      const p3Result = await evaluateMockPart(ai, "Part 3", p3Qs, p3Blobs);
+      const [p1Result, p2Result, p3Result] = await Promise.all([
+         evaluateMockPart(ai, "Part 1", p1Qs, p1Blobs),
+         evaluateMockPart(ai, "Part 2", p2Qs, p2Blobs),
+         evaluateMockPart(ai, "Part 3", p3Qs, p3Blobs)
+      ]);
 
       const overallRaw = (p1Result.score + p2Result.score + p3Result.score) / 3;
       const overallScore = Math.round(overallRaw * 2) / 2;
 
-      const scores = [
-          { name: 'Part 1', score: p1Result.score },
-          { name: 'Part 2', score: p2Result.score },
-          { name: 'Part 3', score: p3Result.score }
-      ];
+      const scores = [{ name: 'Part 1', score: p1Result.score }, { name: 'Part 2', score: p2Result.score }, { name: 'Part 3', score: p3Result.score }];
       const weakest = scores.sort((a,b) => a.score - b.score)[0].name;
-
-      // Simulate fatigue data (real implementation would analyze sentence length/pauses over time)
-      const performanceCurve = [
-          { part: 'Start', fatigueLevel: 10, score: p1Result.score + 0.5 },
-          { part: 'Part 1', fatigueLevel: 30, score: p1Result.score },
-          { part: 'Part 2', fatigueLevel: 60, score: p2Result.score },
-          { part: 'Part 3', fatigueLevel: 90, score: p3Result.score }
-      ];
 
       return {
           id: Date.now().toString(),
           date: new Date().toLocaleDateString(),
           overallScore,
           weakestPart: weakest,
-          parts: {
-              part1: p1Result,
-              part2: p2Result,
-              part3: p3Result
-          },
+          parts: { part1: p1Result, part2: p2Result, part3: p3Result },
           questions,
-          performanceCurve
+          performanceCurve: []
       };
 
   } catch (error) {

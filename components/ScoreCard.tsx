@@ -13,7 +13,6 @@ interface ScoreCardProps {
 const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart, previousScore, onRetry }) => {
   const { score, transcript, improvedVersions, part3Suggestions, feedbackDetail } = result;
   const [activeTab, setActiveTab] = useState<'fc' | 'lr' | 'gra' | 'pr'>('gra');
-  const [demoBand, setDemoBand] = useState<number>(7.0);
 
   const speakText = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -47,8 +46,8 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
      return { graErrors, lrImprovements, prErrors, fillerCounts, totalFillers };
   }, [transcript]);
 
-  // Determine the best model answer to show based on selection
-  const modelAnswer = improvedVersions.find(v => v.band === demoBand) || improvedVersions.find(v => v.band === 7.0) || improvedVersions[0];
+  // Use the first available version. The service is optimized to return just one "Band 6.5" version now.
+  const modelAnswer = improvedVersions[0];
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-12">
@@ -287,12 +286,12 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
             </div>
         </div>
 
-        {/* 4. Model Answer (PRO Design) */}
+        {/* 4. Model Answer (Band 6.5) */}
         {modelAnswer && (
             <div className="bg-blue-50/80 rounded-2xl p-6 border border-blue-100">
                 <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
                     <div className="flex items-center gap-3 w-full md:w-auto">
-                         {/* Play Button at the front */}
+                         {/* Play Button */}
                          <button 
                             onClick={() => speakText(modelAnswer.text)}
                             className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white shadow-md hover:bg-blue-700 hover:scale-110 transition-all"
@@ -305,26 +304,17 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                             <div className="flex items-center gap-2">
                                 <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">PRO</span>
                                 <h3 className="font-bold text-slate-800 text-lg">
-                                    Native Demo
+                                    Model Answer
                                 </h3>
                             </div>
                         </div>
                     </div>
 
-                    {/* Band Switcher */}
+                    {/* Band Indicator */}
                     <div className="flex bg-white rounded-lg p-1 border border-blue-100 shadow-sm">
-                        <button 
-                            onClick={() => setDemoBand(6.0)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${demoBand === 6.0 ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            Band 6.0 (Simple)
-                        </button>
-                        <button 
-                            onClick={() => setDemoBand(7.0)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${demoBand === 7.0 ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            Band 7.0 (Native)
-                        </button>
+                        <div className="px-3 py-1.5 text-xs font-bold rounded-md bg-blue-100 text-blue-700">
+                            Band 6.5 (Achievable Goal)
+                        </div>
                     </div>
                 </div>
                 
@@ -335,7 +325,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({ result, onPart3Click, currentPart
                 </div>
                 
                 <div className="mt-3 text-right">
-                    <p className="text-xs text-slate-400 font-medium">Tip: Listen and repeat to mimic the natural intonation.</p>
+                    <p className="text-xs text-slate-400 font-medium">Tip: Listen and repeat. This answer is simple, clear, and correct.</p>
                 </div>
             </div>
         )}

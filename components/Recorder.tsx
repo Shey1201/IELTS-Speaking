@@ -102,12 +102,30 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, isProcessing }
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              channelCount: 1 // Mono is enough for speech, saves 50% data
+          } 
+      });
       setAudioStream(stream);
       streamRef.current = stream;
       startVisualizer(stream);
 
-      const mediaRecorder = new MediaRecorder(stream);
+      // Reduce bitrate to speed up upload/processing. 
+      // 64kbps is sufficient for voice.
+      const options = { 
+          mimeType: 'audio/webm;codecs=opus', 
+          audioBitsPerSecond: 64000 
+      };
+      
+      // Fallback for Safari/others if mimetype unsupported
+      const mediaRecorder = MediaRecorder.isTypeSupported(options.mimeType) 
+         ? new MediaRecorder(stream, options) 
+         : new MediaRecorder(stream);
+
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
